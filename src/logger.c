@@ -1,4 +1,5 @@
 #include "logger.h"
+#include "process_manager.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -6,6 +7,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
+
 
 static int log_fd = -1;
 
@@ -24,6 +26,19 @@ static ssize_t write_all(int fd, const char *buf, size_t len) {
         total_written += (size_t)written;
     }
     return (ssize_t)total_written;
+}
+
+
+static const char *state_to_string(process_state_t state) {
+    switch (state) {
+        case PROC_UNUSED:        return "UNUSED";
+        case PROC_RUNNING:       return "RUNNING";
+        case PROC_EXITED_NORMAL: return "EXITED_NORMAL";
+        case PROC_CRASHED:       return "CRASHED";
+        case PROC_FAILED_LIMIT:  return "FAILED_LIMIT";
+        case PROC_STOPPED:       return "STOPPED";
+        default:                 return "UNKNOWN";
+    }
 }
 
 int init_logger(const char *log_file_path) {
@@ -96,4 +111,47 @@ void log_event(const char *level, const char *format, ...) {
 
     // Canlı takip ve test kolaylığı için terminale de yaz
     write_all(STDOUT_FILENO, line, bytes_to_write);
+}
+
+
+void log_process_status_report(void) {
+    log_event("STATUS", "========== PROCESS STATUS REPORT (SIGUSR1) ==========");
+
+    int tracked_count = 0;
+
+    for (int i = 0; i < MAX_CHILDREN; i++) {
+        const child_process_t *proc = &process_table[i];
+
+        if (proc->state == PROC_UNUSED) {
+            continue;
+        }
+
+        tracked_count++;
+
+        char start_buf[32] = "N/A";
+        if (proc->start_time > 0) {
+            struct tm start_tm;
+            if (localtime_r(&proc->start_time, &start_tm) != NULL) {
+                strftime(start_buf, sizeof(start_buf), "%H:%M:%S", &start_tm);
+            }
+        }
+
+        log_event("STATUS",
+                  "ID=%d | Name=%s | PID=%d | State=%s | Restarts=%d/%d | LastExit=%d | Mode=%s | Started=%s",
+                  proc->id,
+                  proc->name,
+                  (int)proc->pid,
+                  state_to_string(proc->state),
+                  proc->restart_count,
+                  MAX_RESTARTS,
+                  proc->last_exit_status,
+                  proc->arg,
+                  start_buf);
+    }
+
+    if (tracked_count == 0) {
+        log_event("STATUS", "No child processes currently tracked in process_table.");
+    }
+
+    log_event("STATUS", "====== END OF REPORT (Active Children: %d) ======", active_child_count);
 }
