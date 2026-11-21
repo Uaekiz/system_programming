@@ -36,7 +36,7 @@ int init_logger(const char *log_file_path) {
         log_fd = -1;
     }
 
-    log_fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    log_fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
     if (log_fd < 0) {
         perror("init_logger: open failed");
         return -1;
