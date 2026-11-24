@@ -56,7 +56,7 @@ start_watchdog() {
     WD_PID=$!
     sleep 1
     if ! kill -0 "$WD_PID" 2>/dev/null; then
-        echo -e "${RED}HATA: watchdog baslatilamadi (args: $*)${NC}"
+        echo -e "${RED}ERROR: Failed to start watchdog (args: $*)${NC}"
         return 1
     fi
     return 0
@@ -91,55 +91,55 @@ wait_for_log_pattern() {
 }
 
 # 0. Derleme
-section "0. Derleme Kontrolu (make clean && make)"
+section "0. Build Check (make clean && make)"
 if make clean > /dev/null && make > /dev/null; then
-    pass_case "Proje sifir hatayla derlendi (watchdog ve workers/worker hazir)."
+    pass_case "Project compiled with zero errors (watchdog and workers/worker are ready)."
 else
-    fail_case "Derleme basarisiz oldu!"
+    fail_case "Compilation failed!"
     exit 1
 fi
 
 # 1. Senaryo: Normal Calisma
-section "Senaryo 1: Normal Calisma (En Az 2 Alt Surec)"
+section "Scenario 1: Normal Operation (At Least 2 Child Processes)"
 if start_watchdog; then
     W1_PID="$(get_latest_worker_pid "worker_1")"
     W2_PID="$(get_latest_worker_pid "worker_2")"
 
     if [[ -n "$W1_PID" && -n "$W2_PID" ]] && kill -0 "$W1_PID" 2>/dev/null && kill -0 "$W2_PID" 2>/dev/null; then
-        pass_case "Watchdog (PID=$WD_PID) en az 2 alt sureci baslatti ve takip ediyor (worker_1=$W1_PID, worker_2=$W2_PID)."
+        pass_case "Watchdog (PID=$WD_PID) started and is tracking at least 2 child processes (worker_1=$W1_PID, worker_2=$W2_PID)."
     else
-        fail_case "Baslangic alt surecleri dogrulanamadi (worker_1=${W1_PID:-yok}, worker_2=${W2_PID:-yok})."
+        fail_case "Failed to verify initial child processes (worker_1=${W1_PID:-none}, worker_2=${W2_PID:-none})."
     fi
     stop_watchdog SIGTERM
 else
-    fail_case "Senaryo 1 baslatilamadi."
+    fail_case "Failed to start Scenario 1."
 fi
 
 # 2. Senaryo: Normal Sonlanma
-section "Senaryo 2: Normal Sonlanma (exit(0) - Yeniden Baslatilmamali)"
+section "Scenario 2: Normal Termination (exit(0) - Should Not Restart)"
 if start_watchdog short normal; then
     if wait_for_log_pattern "Child \[worker_1\].*exited normally \(status=0\)\. No restart needed\." 6; then
         sleep 1
         if ! grep -q "Restarting child \[worker_1\]" "$LOG_FILE"; then
             W2_PID="$(get_latest_worker_pid "worker_2")"
             if [[ -n "$W2_PID" ]] && kill -0 "$W2_PID" 2>/dev/null; then
-                pass_case "worker_1 normal sonlandi, yeniden baslatilmadi; worker_2 (PID=$W2_PID) calismaya devam ediyor."
+                pass_case "worker_1 exited normally and was not restarted; worker_2 (PID=$W2_PID) is still running."
             else
-                fail_case "worker_1 normal sonlandi ancak worker_2 beklenmedik sekilde durdu."
+                fail_case "worker_1 exited normally, but worker_2 stopped unexpectedly."
             fi
         else
-            fail_case "Normal sonlanan worker_1 hatali olarak yeniden baslatildi."
+            fail_case "worker_1 exited normally but was erroneously restarted."
         fi
     else
-        fail_case "worker_1 icin normal sonlanma log kaydi bulunamadi."
+        fail_case "Normal termination log entry for worker_1 not found."
     fi
     stop_watchdog SIGTERM
 else
-    fail_case "Senaryo 2 baslatilamadi."
+    fail_case "Failed to start Scenario 2."
 fi
 
 # 3. Senaryo: Beklenmedik Sonlanma (SIGKILL -> Otomatik Yeniden Baslatma)
-section "Senaryo 3: Beklenmedik Sonlanma (kill -SIGKILL -> Otomatik Restart)"
+section "Scenario 3: Unexpected Termination (kill -SIGKILL -> Auto Restart)"
 if start_watchdog normal normal; then
     OLD_W1_PID="$(get_latest_worker_pid "worker_1")"
     # Sinyal gondermeden once PID'nin gercekten test worker'ina ait oldugunu dogrula
@@ -151,24 +151,24 @@ if start_watchdog normal normal; then
             if grep -q "Child \[worker_1\] (PID=${OLD_W1_PID}) killed by signal 9" "$LOG_FILE" \
                && [[ -n "$NEW_W1_PID" && "$NEW_W1_PID" != "$OLD_W1_PID" ]] \
                && kill -0 "$NEW_W1_PID" 2>/dev/null; then
-                pass_case "SIGKILL ile sonlanan worker_1 (eski PID=$OLD_W1_PID) algilandi ve yeni PID=$NEW_W1_PID ile yeniden baslatildi."
+                pass_case "Detected worker_1 terminated by SIGKILL (old PID=$OLD_W1_PID) and restarted it with new PID=$NEW_W1_PID."
             else
-                fail_case "worker_1 yeniden baslatma sonrasi yeni PID dogrulanamadi."
+                fail_case "Failed to verify new PID for worker_1 after restart."
             fi
         else
-            fail_case "SIGKILL sonrasi yeniden baslatma kaydi gorulmedi."
+            fail_case "Restart log entry not found after SIGKILL."
         fi
     else
-        fail_case "worker_1 PID ($OLD_W1_PID) dogrulanamadi, SIGKILL gonderilmedi."
+        fail_case "Could not verify worker_1 PID ($OLD_W1_PID); SIGKILL was not sent."
     fi
     stop_watchdog SIGTERM
 else
-    fail_case "Senaryo 3 baslatilamadi."
+    fail_case "Failed to start Scenario 3."
 fi
 
 # 4. Senaryo: Yeniden Baslatma Limiti (Max 3 Restart + Periyodik Kontrol)
-section "Senaryo 4: Yeniden Baslatma Limiti (Maksimum 3 Restart)"
-echo -e "${YELLOW}[INFO]${NC} crash modu 4 kez calisip limit asimini tetikliyor (~9-10 sn bekleniyor)..."
+section "Scenario 4: Restart Limit (Maximum 3 Restarts)"
+echo -e "${YELLOW}[INFO]${NC} Running crash mode 4 times to trigger restart limit (waiting ~9-10 seconds)..."
 if start_watchdog crash normal; then
     if wait_for_log_pattern "Child \[worker_1\] exceeded max restart limit \(3/3\)" 15; then
         sleep 1
@@ -180,40 +180,40 @@ if start_watchdog crash normal; then
            && grep -q "attempt 3/3" "$LOG_FILE" \
            && ! grep -q "attempt 4/" "$LOG_FILE" \
            && grep -qE "Name=worker_1 .*State=FAILED_LIMIT .*Restarts=3/3" "$LOG_FILE"; then
-            pass_case "worker_1 tam 3 kez yeniden baslatildi, 4. kez baslatilmadi ve FAILED_LIMIT olarak raporlandi."
+            pass_case "worker_1 was restarted exactly 3 times, not restarted a 4th time, and reported as FAILED_LIMIT."
         else
-            fail_case "Yeniden baslatma limiti kayitlari veya FAILED_LIMIT durumu eksik."
+            fail_case "Restart limit log entries or FAILED_LIMIT state missing."
         fi
     else
-        fail_case "worker_1 icin yeniden baslatma limiti asim kaydi zamaninda olusmadi."
+        fail_case "Restart limit exceeded log entry for worker_1 did not appear in time."
     fi
     stop_watchdog SIGTERM
 else
-    fail_case "Senaryo 4 baslatilamadi."
+    fail_case "Failed to start Scenario 4."
 fi
 
 # 5. Senaryo: Durum Raporlama (SIGUSR1)
-section "Senaryo 5: Durum Raporlama (kill -SIGUSR1)"
+section "Scenario 5: Status Reporting (kill -SIGUSR1)"
 if start_watchdog normal normal; then
     kill -SIGUSR1 "$WD_PID"
     if wait_for_log_pattern "END OF REPORT \(Active Children: 2\)" 4; then
         if grep -q "PROCESS STATUS REPORT (SIGUSR1)" "$LOG_FILE" \
            && grep -qE "Name=worker_1 \| PID=[0-9]+ \| State=RUNNING" "$LOG_FILE" \
            && grep -qE "Name=worker_2 \| PID=[0-9]+ \| State=RUNNING" "$LOG_FILE"; then
-            pass_case "SIGUSR1 sonrasi tum aktif alt sureclerin PID ve durumlari log dosyasina yazildi."
+            pass_case "PIDs and states of all active child processes were written to the log file after SIGUSR1."
         else
-            fail_case "SIGUSR1 raporunda worker PID/durum satirlari eksik."
+            fail_case "Worker PID/state lines missing from SIGUSR1 status report."
         fi
     else
-        fail_case "SIGUSR1 durum raporu log dosyasinda bulunamadi."
+        fail_case "SIGUSR1 status report not found in log file."
     fi
     stop_watchdog SIGTERM
 else
-    fail_case "Senaryo 5 baslatilamadi."
+    fail_case "Failed to start Scenario 5."
 fi
 
 # 6a. Senaryo: Kontrollu Kapanma (SIGTERM)
-section "Senaryo 6a: Kontrollu Kapanma (SIGTERM)"
+section "Scenario 6a: Graceful Shutdown (SIGTERM)"
 if start_watchdog normal normal; then
     W1_PID="$(get_latest_worker_pid "worker_1")"
     W2_PID="$(get_latest_worker_pid "worker_2")"
@@ -223,17 +223,17 @@ if start_watchdog normal normal; then
        && grep -q "All child processes terminated. Graceful shutdown complete." "$LOG_FILE" \
        && ! kill -0 "$W1_PID" 2>/dev/null \
        && ! kill -0 "$W2_PID" 2>/dev/null; then
-        pass_case "SIGTERM ile tum alt surecler temiz sekilde sonlandirildi ve toplandi."
+        pass_case "All child processes were cleanly terminated and reaped on SIGTERM."
     else
-        fail_case "SIGTERM kontrollu kapanma dogrulamasi basarisiz."
+        fail_case "SIGTERM graceful shutdown verification failed."
     fi
 else
-    fail_case "Senaryo 6a baslatilamadi."
+    fail_case "Failed to start Scenario 6a."
 fi
 
 # 6b. Senaryo: Kontrollu Kapanma (SIGINT + Timeout Sonrasi SIGKILL)
-section "Senaryo 6b: Kontrollu Kapanma (SIGINT + hang Worker Timeout SIGKILL)"
-echo -e "${YELLOW}[INFO]${NC} SIGTERM yok sayan hang worker icin 5 sn timeout bekleniyor..."
+section "Scenario 6b: Graceful Shutdown (SIGINT + hang Worker Timeout SIGKILL)"
+echo -e "${YELLOW}[INFO]${NC} Waiting for 5s timeout for hang worker ignoring SIGTERM..."
 if start_watchdog hang normal; then
     W1_PID="$(get_latest_worker_pid "worker_1")"
     W2_PID="$(get_latest_worker_pid "worker_2")"
@@ -245,12 +245,12 @@ if start_watchdog hang normal; then
        && grep -q "All child processes terminated. Graceful shutdown complete." "$LOG_FILE" \
        && ! kill -0 "$W1_PID" 2>/dev/null \
        && ! kill -0 "$W2_PID" 2>/dev/null; then
-        pass_case "SIGINT ile normal worker temiz kapandi, kapanmayan hang worker timeout sonrasi SIGKILL ile sonlandirildi."
+        pass_case "Normal worker exited cleanly on SIGINT; unresponsive hang worker was terminated via SIGKILL after timeout."
     else
-        fail_case "SIGINT veya timeout SIGKILL mekanizmasi dogrulanamadi."
+        fail_case "Failed to verify SIGINT or timeout SIGKILL escalation."
     fi
 else
-    fail_case "Senaryo 6b baslatilamadi."
+    fail_case "Failed to start Scenario 6b."
 fi
 
 # Tum testlerin birlesik logunu watchdog.log icine kaydet
@@ -258,8 +258,7 @@ archive_and_reset_log
 cp "$COMBINED_LOG" "$LOG_FILE"
 
 # 7. Senaryo: Log ve Zombi Surec Dogrulama
-# 7. Senaryo: Log ve Zombi Surec Dogrulama
-section "Senaryo 7: Log Format, Olay Kapsami ve Zombi Surec Dogrulama"
+section "Scenario 7: Log Format, Event Coverage, and Zombie Process Verification"
 
 INVALID_LINES="$(grep -vE '^$|^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\] \[(INFO|WARN|ERROR|STATUS)\] ' "$LOG_FILE" || true)"
 
@@ -273,22 +272,22 @@ if [[ -z "$INVALID_LINES" ]] \
    && grep -q "PROCESS STATUS REPORT (SIGUSR1)" "$LOG_FILE" \
    && grep -q "Periodic health check completed" "$LOG_FILE" \
    && grep -q "Graceful shutdown complete" "$LOG_FILE"; then
-    pass_case "Tum kritik olaylar gecerli zaman damgasiyla watchdog.log dosyasinda dogrulandi."
+    pass_case "All critical events verified with valid timestamps in watchdog.log."
 else
-    fail_case "Log formatinda veya zorunlu olay kayitlarinda eksiklik var."
+    fail_case "Invalid log format or missing required event entries."
 fi
 
 ZOMBIES="$(ps -eo pid,stat,comm | awk '$2 ~ /Z/ && ($3 == "worker" || $3 == "watchdog")')"
 if [[ -z "$ZOMBIES" ]]; then
-    pass_case "Testler sonrasi hic zombi (defunct) watchdog/worker sureci kalmadi."
+    pass_case "No zombie (defunct) watchdog/worker processes remain after tests."
 else
-    fail_case "Zombi surec tespit edildi: $ZOMBIES"
+    fail_case "Zombie process detected: $ZOMBIES"
 fi
 
 echo -e "\n============================================================"
-echo -e "TEST OZETI: ${GREEN}${PASSED} BASARILI${NC} | ${RED}${FAILED} BASARISIZ${NC}"
-echo -e "Birlesik log dosyasi: ${ROOT_DIR}/${LOG_FILE}"
-echo -e "Not: Gercek klavye Ctrl+C (SIGINT) davranisini terminalde './watchdog' ile ayrica dogrulayiniz."
+echo -e "TEST SUMMARY: ${GREEN}${PASSED} PASSED${NC} | ${RED}${FAILED} FAILED${NC}"
+echo -e "Combined log file: ${ROOT_DIR}/${LOG_FILE}"
+echo -e "Note: Please also verify interactive Ctrl+C (SIGINT) behavior separately by running './watchdog' in a terminal."
 echo -e "============================================================"
 
 if (( FAILED > 0 )); then
