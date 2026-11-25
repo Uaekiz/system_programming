@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -u
 
-# Scriptin hangi dizinden calistirildigindan bagimsiz olarak proje kokune gec
+# Switch to the project root regardless of the directory the script is run from
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR" || exit 1
 
@@ -90,7 +90,7 @@ wait_for_log_pattern() {
     return 1
 }
 
-# 0. Derleme
+# 0. Build
 section "0. Build Check (make clean && make)"
 if make clean > /dev/null && make > /dev/null; then
     pass_case "Project compiled with zero errors (watchdog and workers/worker are ready)."
@@ -99,7 +99,7 @@ else
     exit 1
 fi
 
-# 1. Senaryo: Normal Calisma
+# 1. Scenario: Normal Operation
 section "Scenario 1: Normal Operation (At Least 2 Child Processes)"
 if start_watchdog; then
     W1_PID="$(get_latest_worker_pid "worker_1")"
@@ -115,7 +115,7 @@ else
     fail_case "Failed to start Scenario 1."
 fi
 
-# 2. Senaryo: Normal Sonlanma
+# 2. Scenario: Normal Termination
 section "Scenario 2: Normal Termination (exit(0) - Should Not Restart)"
 if start_watchdog short normal; then
     if wait_for_log_pattern "Child \[worker_1\].*exited normally \(status=0\)\. No restart needed\." 6; then
@@ -138,11 +138,11 @@ else
     fail_case "Failed to start Scenario 2."
 fi
 
-# 3. Senaryo: Beklenmedik Sonlanma (SIGKILL -> Otomatik Yeniden Baslatma)
+# 3. Scenario: Unexpected Termination (SIGKILL -> Automatic Restart)
 section "Scenario 3: Unexpected Termination (kill -SIGKILL -> Auto Restart)"
 if start_watchdog normal normal; then
     OLD_W1_PID="$(get_latest_worker_pid "worker_1")"
-    # Sinyal gondermeden once PID'nin gercekten test worker'ina ait oldugunu dogrula
+    # Verify that the PID really belongs to the test worker before sending the signal
     if [[ -n "$OLD_W1_PID" ]] && ps -p "$OLD_W1_PID" -o args= 2>/dev/null | grep -q "workers/worker"; then
         kill -SIGKILL "$OLD_W1_PID"
         if wait_for_log_pattern "Restarting child \[worker_1\] \(attempt 1/3\)" 4; then
@@ -166,7 +166,7 @@ else
     fail_case "Failed to start Scenario 3."
 fi
 
-# 4. Senaryo: Yeniden Baslatma Limiti (Max 3 Restart + Periyodik Kontrol)
+# 4. Scenario: Restart Limit (Max 3 Restarts + Periodic Check)
 section "Scenario 4: Restart Limit (Maximum 3 Restarts)"
 echo -e "${YELLOW}[INFO]${NC} Running crash mode 4 times to trigger restart limit (waiting ~9-10 seconds)..."
 if start_watchdog crash normal; then
@@ -192,7 +192,7 @@ else
     fail_case "Failed to start Scenario 4."
 fi
 
-# 5. Senaryo: Durum Raporlama (SIGUSR1)
+# 5. Scenario: Status Reporting (SIGUSR1)
 section "Scenario 5: Status Reporting (kill -SIGUSR1)"
 if start_watchdog normal normal; then
     kill -SIGUSR1 "$WD_PID"
@@ -212,7 +212,7 @@ else
     fail_case "Failed to start Scenario 5."
 fi
 
-# 6a. Senaryo: Kontrollu Kapanma (SIGTERM)
+# 6a. Scenario: Controlled Shutdown (SIGTERM)
 section "Scenario 6a: Graceful Shutdown (SIGTERM)"
 if start_watchdog normal normal; then
     W1_PID="$(get_latest_worker_pid "worker_1")"
@@ -231,7 +231,7 @@ else
     fail_case "Failed to start Scenario 6a."
 fi
 
-# 6b. Senaryo: Kontrollu Kapanma (SIGINT + Timeout Sonrasi SIGKILL)
+# 6b. Scenario: Controlled Shutdown (SIGINT + SIGKILL After Timeout)
 section "Scenario 6b: Graceful Shutdown (SIGINT + hang Worker Timeout SIGKILL)"
 echo -e "${YELLOW}[INFO]${NC} Waiting for 5s timeout for hang worker ignoring SIGTERM..."
 if start_watchdog hang normal; then
@@ -253,11 +253,11 @@ else
     fail_case "Failed to start Scenario 6b."
 fi
 
-# Tum testlerin birlesik logunu watchdog.log icine kaydet
+# Save the combined log of all tests into watchdog.log
 archive_and_reset_log
 cp "$COMBINED_LOG" "$LOG_FILE"
 
-# 7. Senaryo: Log ve Zombi Surec Dogrulama
+# 7. Scenario: Log and Zombie Process Verification
 section "Scenario 7: Log Format, Event Coverage, and Zombie Process Verification"
 
 INVALID_LINES="$(grep -vE '^$|^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\] \[(INFO|WARN|ERROR|STATUS)\] ' "$LOG_FILE" || true)"

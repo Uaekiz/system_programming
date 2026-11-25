@@ -24,7 +24,7 @@ static void launch_workers_from_args(int argc, char *argv[]) {
         return;
     }
 
-    // Sayısal argüman verildiyse (örn: ./watchdog 3) o sayıda normal worker başlat
+    // If a numeric argument is given (e.g., ./watchdog 3), start that many normal workers
     if (argc == 2 && !is_valid_worker_mode(argv[1])) {
         char *endptr = NULL;
         long count = strtol(argv[1], &endptr, 10);
@@ -34,7 +34,7 @@ static void launch_workers_from_args(int argc, char *argv[]) {
         }
     }
 
-    // Worker çalışma modları argüman olarak verildiyse (örn: ./watchdog short normal)
+    // If worker modes are given as arguments (e.g., ./watchdog short normal)
     int launched = 0;
     for (int i = 1; i < argc && launched < MAX_CHILDREN; i++) {
         const char *mode = is_valid_worker_mode(argv[i]) ? argv[i] : "normal";
@@ -45,7 +45,7 @@ static void launch_workers_from_args(int argc, char *argv[]) {
         }
     }
 
-    // En az 2 alt süreç kuralını korumak için eksik kalırsa normal worker ile tamamla
+    // To honor the at-least-2-children rule, fill the gap with normal workers if needed
     while (launched < DEFAULT_INITIAL_CHILDREN && launched < MAX_CHILDREN) {
         char name_buf[32];
         snprintf(name_buf, sizeof(name_buf), "worker_%d", launched + 1);
@@ -58,7 +58,7 @@ static void launch_workers_from_args(int argc, char *argv[]) {
 }
 
 int main(int argc, char *argv[]) {
-    // 1. Önce loglayıcıyı başlat
+    // 1. Initialize the logger first
     if (init_logger(DEFAULT_LOG_FILE) != 0) {
         fprintf(stderr, "Fatal: Failed to initialize logger.\n");
         return EXIT_FAILURE;
@@ -66,21 +66,21 @@ int main(int argc, char *argv[]) {
 
     log_event("INFO", "Watchdog supervisor starting (PID=%d)...", (int)getpid());
 
-    // 2. Süreç yöneticisi tablosunu hazırla
+    // 2. Prepare the process manager table
     init_process_manager();
 
-    // 3. Alt süreçler başlatılmadan önce sinyal yakalayıcıları kur (SIGCHLD kaybını önler)
+    // 3. Install signal handlers before starting children (prevents losing SIGCHLD)
     if (setup_signal_handlers() != 0) {
         log_event("ERROR", "Fatal: Failed to install signal handlers.");
         close_logger();
         return EXIT_FAILURE;
     }
 
-    // 4. Başlangıç alt süreçlerini ve periyodik sağlık kontrolü zamanlayıcısını başlat
+    // 4. Start the initial children and the periodic health check timer
     launch_workers_from_args(argc, argv);
     setup_periodic_timer(DEFAULT_HEALTH_CHECK_INTERVAL);
 
-    // Sinyal bekleme sırasında yarış durumunu (race condition) önlemek için sinyal maskesi
+    // Signal mask to prevent a race condition while waiting for signals
     sigset_t wait_mask;
     sigset_t orig_mask;
     sigemptyset(&wait_mask);
@@ -90,7 +90,7 @@ int main(int argc, char *argv[]) {
     sigaddset(&wait_mask, SIGCHLD);
     sigaddset(&wait_mask, SIGALRM);
 
-    // 5. Ana kontrol döngüsü
+    // 5. Main control loop
     while (!shutdown_flag) {
         if (sigchld_flag) {
             sigchld_flag = 0;
@@ -112,7 +112,7 @@ int main(int argc, char *argv[]) {
             break;
         }
 
-        // Sinyalleri atomik olarak beklerken CPU tüketimini %0'da tut
+        // Keep CPU usage at 0% while waiting for signals atomically
         sigprocmask(SIG_BLOCK, &wait_mask, &orig_mask);
         if (!shutdown_flag && !sigchld_flag && !sigusr1_flag && !sigalrm_flag) {
             sigsuspend(&orig_mask);
@@ -120,7 +120,7 @@ int main(int argc, char *argv[]) {
         sigprocmask(SIG_SETMASK, &orig_mask, NULL);
     }
 
-    // 6. Kontrollü kapanış ve kaynak temizliği
+    // 6. Controlled shutdown and resource cleanup
     const char *sig_name = (shutdown_signal == SIGINT)    ? "SIGINT"
                            : (shutdown_signal == SIGTERM) ? "SIGTERM"
                                                           : "SIGNAL";

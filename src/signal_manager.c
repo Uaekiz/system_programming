@@ -17,7 +17,7 @@ volatile sig_atomic_t sigalrm_flag = 0;
 volatile sig_atomic_t shutdown_flag = 0;
 volatile sig_atomic_t shutdown_signal = 0;
 
-// Async-signal-safe handler fonksiyonları (yalnızca volatile sig_atomic_t bayrakları güncellenir)
+// Async-signal-safe handler functions (only the volatile sig_atomic_t flags are updated)
 static void handle_sigint(int sig) {
     (void)sig;
     shutdown_signal = SIGINT;
@@ -51,14 +51,14 @@ static int install_handler(int signum, void (*handler)(int), int flags) {
     sa.sa_handler = handler;
     sigemptyset(&sa.sa_mask);
 
-    // Handler çalışırken diğer yönetilen sinyallerin kesinti yapmasını engelle
+    // Prevent other managed signals from interrupting while the handler is running
     sigaddset(&sa.sa_mask, SIGINT);
     sigaddset(&sa.sa_mask, SIGTERM);
     sigaddset(&sa.sa_mask, SIGUSR1);
     sigaddset(&sa.sa_mask, SIGCHLD);
     sigaddset(&sa.sa_mask, SIGALRM);
 
-    // SA_RESTART kullanılmaz: ana döngüdeki bekleme çağrıları sinyal gelince hemen uyanmalıdır
+    // SA_RESTART is not used: blocking calls in the main loop must wake up immediately when a signal arrives
     sa.sa_flags = flags;
 
     if (sigaction(signum, &sa, NULL) == -1) {
@@ -79,7 +79,7 @@ int setup_signal_handlers(void) {
     if (install_handler(SIGUSR1, handle_sigusr1, 0) == -1) {
         return -1;
     }
-    // SA_NOCLDSTOP: yalnızca alt süreç sonlandığında SIGCHLD üretir (duraklatmada üretmez)
+    // SA_NOCLDSTOP: generates SIGCHLD only when a child terminates (not when it is stopped)
     if (install_handler(SIGCHLD, handle_sigchld, SA_NOCLDSTOP) == -1) {
         return -1;
     }
@@ -120,14 +120,14 @@ void graceful_shutdown(int timeout_sec) {
         timeout_sec = 0;
     }
 
-    // Kapanış sırasında periyodik alarmın yeniden tetiklenmesini durdur
+    // Stop the periodic alarm from firing again during shutdown
     struct itimerval disable_timer;
     memset(&disable_timer, 0, sizeof(disable_timer));
     setitimer(ITIMER_REAL, &disable_timer, NULL);
 
     log_event("INFO", "Graceful shutdown initiated (timeout: %d seconds).", timeout_sec);
 
-    // 1. Aşama: Tüm çalışan alt süreçlere SIGTERM gönder
+    // Phase 1: Send SIGTERM to all running child processes
     int signaled_count = 0;
     for (int i = 0; i < MAX_CHILDREN; i++) {
         if (process_table[i].state == PROC_RUNNING && process_table[i].pid > 0) {
@@ -148,7 +148,7 @@ void graceful_shutdown(int timeout_sec) {
         return;
     }
 
-    // 2. Aşama: Timeout süresi boyunca sonlanan çocukları waitpid(WNOHANG) ile topla
+    // Phase 2: Reap terminated children with waitpid(WNOHANG) throughout the timeout period
     struct timespec start_time;
     clock_gettime(CLOCK_MONOTONIC, &start_time);
 
@@ -187,12 +187,12 @@ void graceful_shutdown(int timeout_sec) {
             break;
         }
 
-        // CPU'yu yormamak için 100 ms bekle
+        // Wait 100 ms to avoid burning CPU
         struct timespec sleep_ts = {0, 100000000L};
         nanosleep(&sleep_ts, NULL);
     }
 
-    // 3. Aşama: Süre dolmasına rağmen kapanmayan süreçleri ("hang" vb.) SIGKILL ile zorla sonlandır
+    // Phase 3: Force-terminate processes that did not shut down within the timeout ("hang" etc.) with SIGKILL
     for (int i = 0; i < MAX_CHILDREN; i++) {
         if (process_table[i].state == PROC_RUNNING && process_table[i].pid > 0) {
             pid_t stubborn_pid = process_table[i].pid;

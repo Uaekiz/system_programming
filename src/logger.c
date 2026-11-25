@@ -11,7 +11,7 @@
 
 static int log_fd = -1;
 
-// Kısmi yazma ve sinyal kesintilerine (EINTR) dayanıklı POSIX write sarmalayıcısı
+// POSIX write wrapper resilient to partial writes and signal interruptions (EINTR)
 static ssize_t write_all(int fd, const char *buf, size_t len) {
     size_t total_written = 0;
 
@@ -69,7 +69,7 @@ void close_logger(void) {
 
 void log_event(const char *level, const char *format, ...) {
     if (log_fd < 0) {
-        // init_logger çağrılmadan log_event kullanılırsa varsayılan dosyayı otomatik aç
+        // If log_event is used before init_logger, automatically open the default file
         init_logger(DEFAULT_LOG_FILE);
     }
 
@@ -109,7 +109,7 @@ void log_event(const char *level, const char *format, ...) {
         write_all(log_fd, line, bytes_to_write);
     }
 
-    // Canlı takip ve test kolaylığı için terminale de yaz
+    // Also write to the terminal for live tailing and test convenience
     write_all(STDOUT_FILENO, line, bytes_to_write);
 }
 

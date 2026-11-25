@@ -85,7 +85,7 @@ pid_t start_child_process(int index, const char *name, const char *mode_arg) {
     }
 
     if (pid == 0) {
-        // Alt sureci kendi surec grubuna al (terminal Ctrl+C sadece watchdog'a gitsin)
+        // Put the child into its own process group (terminal Ctrl+C only reaches the watchdog)
         setpgid(0, 0);
         reset_child_signals();
 

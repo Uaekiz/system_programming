@@ -50,13 +50,13 @@ int main(int argc, char *argv[]) {
     fflush(stdout);
 
     if (strcmp(mode, "short") == 0) {
-        // Normal sonlanma testi: 3 saniye calisir ve exit(0) ile biter
+        // Normal termination test: runs for 3 seconds and exits via exit(0)
         sleep_interruptible(3);
         printf("[Worker PID=%d] Completed work normally (exit 0).\n", (int)pid);
         fflush(stdout);
         return EXIT_SUCCESS;
     } else if (strcmp(mode, "crash") == 0) {
-        // Beklenmedik sonlanma testi: 2 saniye sonra hata koduyla sonlanir
+        // Unexpected termination test: exits with an error code after 2 seconds
         sleep_interruptible(2);
         if (!terminate_requested) {
             fprintf(stderr, "[Worker PID=%d] Simulating unexpected error exit (exit 1)!\n", (int)pid);
@@ -64,12 +64,12 @@ int main(int argc, char *argv[]) {
             return EXIT_FAILURE;
         }
     } else if (strcmp(mode, "hang") == 0) {
-        // Timeout (SIGKILL) testi: SIGTERM sinyalini yok sayar
+        // Timeout (SIGKILL) test: ignores the SIGTERM signal
         while (1) {
             sleep(5);
         }
     } else {
-        // "normal" (varsayilan) mod: SIGTERM gelene kadar calismaya devam eder
+        // "normal" (default) mode: keeps running until SIGTERM arrives
         while (!terminate_requested) {
             sleep(1);
         }

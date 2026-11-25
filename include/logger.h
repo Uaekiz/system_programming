@@ -3,16 +3,16 @@
 
 #define DEFAULT_LOG_FILE "watchdog.log"
 
-// Log dosyasını açar/hazırlar. Başarılıysa 0, hata varsa -1 döner.
+// Opens/prepares the log file. Returns 0 on success, -1 on error.
 int init_logger(const char *log_file_path);
 
-// Açık olan log dosyasını güvenli şekilde kapatır.
+// Safely closes the open log file.
 void close_logger(void);
 
-// Zaman damgalı olay kaydı yazar (örn: log_event("INFO", "Worker %d started", pid)).
+// Writes a timestamped event entry (e.g., log_event("INFO", "Worker %d started", pid)).
 void log_event(const char *level, const char *format, ...);
 
-// SIGUSR1 tetiklendiğinde process_table üzerinden süreç durum raporunu loglar.
+// Logs a process status report from process_table when SIGUSR1 is triggered.
 void log_process_status_report(void);
 
-#endif // LOGGER_H
+#endif
